@@ -59,6 +59,7 @@ class FileIndex
 		/** If no arguments are set, assume current directory */
 		if ( $args = $this->setDirectorySwitch( $args ) )
 		{
+			$args['path'] = $this->getBasePath( $args );
 			$max = $this->getMaxItems( $args );
 			$subtypes = $this->opts['subtypes'];
 
@@ -66,20 +67,14 @@ class FileIndex
 			$args['class'] = $this->opts['supertype'];
 
 			$str = '<article>' . PHP_EOL;
-			foreach ( $subtypes as $subtype => $type ) {
-				$args['type'] = $type['type'];
-				$args['subtype'] = $subtype;
 
-				/** If the class is not already present, add it. */
-				if( strpos( $args['class'], $args['type'] ) === FALSE )
-				   {
-					$args['class'] .= ' ' . $args['type'];
-				   }
-				if ( $match = $this->getMatchPattern( $subtype, $args ) )
-				{
-					$str .= $this->iterateFiles( $match, $max, $args );
-				}
+			/** If the class is not already present, add it. */
+			if( strpos( $args['class'], $args['type'] ) === FALSE )
+			{
+				$args['class'] .= ' ' . $args['type'];
 			}
+
+			$str .= $this->iterateDirectory( $match, $max, $args );
 			$str .= '</article>' . PHP_EOL;
 
 			if ( isset( $args['doctype'] ) && $args['doctype'] )
@@ -92,6 +87,64 @@ class FileIndex
 		{
 			return "Error.";
 		}
+	}
+
+	/**
+	 * Iterate Directory.
+	 *
+	 * Capability for html, png, and a directory.
+	 *
+	 * @param string $match
+	 * @param array $args
+	 *
+	 * @return string
+	 */
+	private function iterateDirectory( $match, $max, $args )
+	{
+		$str = '';
+		$cnt = 0;
+		$reader = new DirectoryReader( $args['path'] );
+		$dir = $reader->getListing();
+		$str = '<ol>' . PHP_EOL;
+		foreach ( $dir['directories'] as $file )
+		{
+			$str .= sprintf( '<li><a href="%s/">%s</a></li>%s', $file['fileName'], $this->ucAsNeeded( $file['fileName'] ), PHP_EOL );
+		}
+		$str .= '</ol>' . PHP_EOL;
+		return $str;
+	}
+
+	/**
+	 * Upper Case As Needed.
+	 *
+	 * Convert to uppercase if first letter or if all non-vowels and three letters or greater.
+	 *
+	 * @param string $str
+	 *
+	 * @return string
+	 */
+	private function ucAsNeeded( $str )
+	{
+		// check for any vowels
+		$regex = '/([aeiou])/';
+		preg_match( $regex, $str, $match );
+
+		// If there are NO voweols and the string length is less than, say, seven
+		// it is probably an acronym. If there are only two letters, it is proably
+		// an acronym.
+		if (
+			 ( strlen( $str ) < 3 )
+			 ||
+			 ( ! isset( $match[0] ) && strlen( $str ) <= 7 )
+		   )
+		{
+			$converted = strtoupper( $str );
+		}
+		// else, it contains vowels and is of a reasonable length.
+		else {
+			$converted = ucfirst( $str );
+		}
+		return $converted;
 	}
 
 	/**
@@ -108,7 +161,6 @@ class FileIndex
 	{
 		$str = '';
 		$cnt = 0;
-		echo $match . "<br />";
 		foreach ( glob( $match ) as $file )
 		{
 			$cnt++;
@@ -116,7 +168,6 @@ class FileIndex
 			{
 				break;
 			}
-			echo $file . "<br />";
 			$args['file'] = $file;
 			/** Remove the root of the file path to use it an item source. */
 			$args['src'] = $this->getSrcFromFile( $args['file'] );
@@ -214,10 +265,9 @@ class FileIndex
 	 */
 	private function getMatchPattern( $type, $args )
 	{
-		$path = $this->getBasePath( $args );
 		$prefix = "/*";
-		$match =  $path . $prefix . $type;
-		$match = $path . "/*.*";
+		$match =  $args['path'] . $prefix . $type;
+		$match = $args['path'] . "/*.*";
 		/** Very basic check. Can improve, if needed. */
 		if ( strlen( $match ) > 5 )
 		{
@@ -435,7 +485,7 @@ class DirectoryReader
         try {
             $this->directory = $directory;
             $this->listing = array();
-            $this->ListDir();
+            $this->listDir();
         }
 		catch(UnexpectedValueException $e)
 		{
@@ -460,13 +510,36 @@ class DirectoryReader
     }
 
 	/**
-	 * List the directory.
+	 * List the Directories (Non Recursively).
 	 *
 	 * @param void
 	 *
 	 * @return array
 	 */
     private function listDir()
+	{
+        foreach ( new DirectoryIterator($this->directory) as $path )
+		{
+            if($path->isDir())
+			{
+                $cache = $this->getInfoArray($path->__toString());
+                isset($cache) ? $this->listing['directories'][] = $cache : "";
+                unset($cache);
+            } else
+			{
+                $this->listing['files'][] = $this->getInfoArray($path->__toString());
+            }
+        }
+    }
+
+	/**
+	 * List the Directories Recursively.
+	 *
+	 * @param void
+	 *
+	 * @return array
+	 */
+    private function listDirRecursive()
 	{
         $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($this->directory), RecursiveIteratorIterator::CHILD_FIRST);
         foreach($iterator as $path)
@@ -498,15 +571,15 @@ class DirectoryReader
             return;
         } else {
             return array(
-               "pathname"    => $d->getPathname(),
+               "pathName"    => $d->getPathname(),
                "access"      => $d->getATime(),
                "modified"    => $d->getMTime(),
                "permissions" => $d->getPerms(),
                "size"        => $d->getSize(),
                "type"        => $d->getType(),
                "path"        => $d->getPath(),
-               "basename"    => $d->getBasename(),
-               "filename"    => $d->getFilename()
+               "baseName"    => $d->getBasename(),
+               "fileName"    => $d->getFilename()
             );
         }
     }
@@ -567,4 +640,13 @@ else
 	 */
 	$file_index = new FileIndex();
 	echo $file_index -> get();
+}
+
+function pre_dump( $arr ) {
+	if( 1 )
+	{
+		echo "<pre>";
+		var_dump( $arr );
+		echo "</pre>";
+	}
 }
